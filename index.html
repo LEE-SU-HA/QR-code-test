@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>처방전 QR 판독기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<style>
+:root {
+  --paper: #FAFBF8;
+  --surface: #FFFFFF;
+  --ink: #1E2622;
+  --muted: #66716C;
+  --line: #3D7068;
+  --line-soft: #C9D8D4;
+  --tint: #EEF4F2;
+  --missing: #9A6B12;
+  --error: #B23A2E;
+  --error-bg: #FBEDEA;
+  color-scheme: light;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #131816; --surface: #1A201E; --ink: #E3EAE6; --muted: #93A09A;
+    --line: #74AEA3; --line-soft: #34423E; --tint: #1F2A27;
+    --missing: #E0B157; --error: #F08A7E; --error-bg: #2E1B18;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #131816; --surface: #1A201E; --ink: #E3EAE6; --muted: #93A09A;
+  --line: #74AEA3; --line-soft: #34423E; --tint: #1F2A27;
+  --missing: #E0B157; --error: #F08A7E; --error-bg: #2E1B18;
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: inherit; }
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+main { max-width: 760px; margin: 0 auto; padding: 40px 20px 64px; }
+
+header h1 { font-size: 1.75rem; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.01em; }
+header p { margin: 0; color: var(--muted); max-width: 60ch; }
+
+.inputs { margin-top: 32px; display: grid; gap: 20px; }
+.step { display: grid; grid-template-columns: 2rem 1fr; gap: 0 12px; }
+.step-num {
+  width: 2rem; height: 2rem; border-radius: 50%;
+  border: 1.5px solid var(--line); color: var(--line);
+  display: grid; place-items: center; font-weight: 600; font-size: 0.9rem;
+}
+.step h2 { font-size: 1rem; font-weight: 600; margin: 3px 0 8px; }
+.step .hint { color: var(--muted); font-size: 0.875rem; margin: 6px 0 0; }
+
+.file-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn {
+  font: inherit; font-weight: 500; font-size: 0.9375rem;
+  padding: 9px 16px; border-radius: 6px; cursor: pointer;
+  border: 1.5px solid var(--line); background: var(--surface); color: var(--line);
+}
+.btn:hover { background: var(--tint); }
+.btn.primary { background: var(--line); color: var(--paper); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid var(--line); outline-offset: 2px; }
+.file-name { color: var(--muted); font-size: 0.875rem; overflow-wrap: anywhere; }
+.file-name.ok { color: var(--ink); }
+input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+details.paste { margin-top: 10px; }
+details.paste summary { cursor: pointer; color: var(--muted); font-size: 0.875rem; }
+textarea {
+  width: 100%; margin-top: 8px; min-height: 84px; resize: vertical;
+  font: 0.8125rem/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  padding: 10px; border-radius: 6px; border: 1px solid var(--line-soft);
+  background: var(--surface); color: var(--ink);
+}
+
+.actions { margin-top: 4px; padding-left: calc(2rem + 12px); }
+.status { margin-top: 14px; padding: 12px 14px; border-radius: 6px; font-size: 0.9375rem; }
+.status.error { background: var(--error-bg); color: var(--error); }
+.status.info { background: var(--tint); color: var(--ink); }
+.check { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 0.9375rem; cursor: pointer; }
+.check input { width: 18px; height: 18px; accent-color: var(--line); margin: 0; }
+.check input:focus-visible { outline: 3px solid var(--line); outline-offset: 2px; }
+.status[hidden] { display: none; }
+
+/* 처방전 양식 */
+.rx { margin-top: 40px; }
+.rx[hidden] { display: none; }
+.form {
+  background: var(--surface);
+  border: 2px solid var(--line);
+  color: var(--ink);
+}
+.form-title {
+  display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px 16px;
+  padding: 14px 18px; border-bottom: 2px solid var(--line);
+}
+.form-title h2 { margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: 0.5em; margin-right: -0.5em; color: var(--line); }
+.form-title .issue { color: var(--muted); font-size: 0.9375rem; }
+.form-title .issue b { color: var(--ink); font-weight: 500; }
+
+.sec { display: grid; grid-template-columns: 7.5rem 1fr; border-bottom: 1px solid var(--line); }
+.sec:last-child { border-bottom: 0; }
+.sec-head {
+  background: var(--tint); color: var(--line); font-weight: 600; font-size: 0.9375rem;
+  padding: 12px 14px; border-right: 1px solid var(--line);
+  display: flex; align-items: center;
+}
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.field { padding: 10px 14px; border-right: 1px solid var(--line-soft); }
+.field:last-child { border-right: 0; }
+.field .k { display: block; font-size: 0.8125rem; color: var(--muted); }
+.field .v { display: block; font-weight: 500; overflow-wrap: anywhere; }
+.missing { color: var(--missing); font-weight: 400; }
+
+.rrn { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.linkish {
+  font: inherit; font-size: 0.8125rem; color: var(--line); background: none; border: 0; padding: 0;
+  text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+}
+
+.codes { padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.code { border: 1px solid var(--line); color: var(--line); padding: 1px 10px; border-radius: 4px; font-weight: 500; }
+
+.drugs-wrap { overflow-x: auto; }
+table.drugs { width: 100%; border-collapse: collapse; min-width: 480px; }
+.drugs th, .drugs td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+.drugs th { font-size: 0.8125rem; font-weight: 500; color: var(--muted); }
+.drugs tr:last-child td { border-bottom: 0; }
+.drugs td.num, .drugs th.num { text-align: right; white-space: nowrap; }
+.drugs td:first-child { font-weight: 500; }
+
+.extra { padding: 10px 14px; font-size: 0.875rem; }
+.extra dt { color: var(--muted); }
+.extra dd { margin: 0 0 6px; overflow-wrap: anywhere; }
+
+details.raw { margin-top: 16px; }
+details.raw summary { cursor: pointer; color: var(--muted); font-size: 0.9375rem; }
+details.raw pre {
+  margin: 8px 0 0; padding: 14px; overflow-x: auto; border-radius: 6px;
+  background: var(--surface); border: 1px solid var(--line-soft);
+  font: 0.8125rem/1.55 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.rx-actions { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+footer { margin-top: 48px; color: var(--muted); font-size: 0.8125rem; max-width: 60ch; }
+
+@media (max-width: 560px) {
+  main { padding-top: 28px; }
+  .sec { grid-template-columns: 1fr; }
+  .sec-head { border-right: 0; border-bottom: 1px solid var(--line); padding: 8px 14px; }
+  .fields { grid-template-columns: 1fr 1fr; }
+  .field { border-bottom: 1px solid var(--line-soft); }
+  .form-title h2 { font-size: 1.25rem; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rx.reveal .form { animation: settle 0.35s ease-out; }
+  @keyframes settle { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+}
+@media print {
+  .inputs, .actions, .status, header p, footer, details.raw, .rx-actions, .linkish { display: none !important; }
+  body { background: #fff; }
+}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>처방전 QR 판독기</h1>
+    <p>암호화된 처방전 QR코드와 키 파일을 넣으면 처방 내용을 읽을 수 있습니다. 해독은 이 브라우저 안에서만 이루어지고, QR 이미지나 키는 어디로도 전송되지 않습니다.</p>
+  </header>
+
+  <section class="inputs" aria-label="입력">
+    <div class="step">
+      <div class="step-num" aria-hidden="true">1</div>
+      <div>
+        <h2>QR코드 불러오기</h2>
+        <div class="file-row">
+          <label class="btn" for="qrFile">이미지 선택</label>
+          <input type="file" id="qrFile" accept="image/*">
+          <label class="btn" for="qrCam">카메라로 찍기</label>
+          <input type="file" id="qrCam" accept="image/*" capture="environment">
+          <span class="file-name" id="qrName">선택된 이미지 없음</span>
+        </div>
+        <details class="paste">
+          <summary>QR 내용을 직접 붙여넣기</summary>
+          <textarea id="qrText" placeholder="QR코드에 담긴 주소나 RX1로 시작하는 문자열을 붙여넣으세요" spellcheck="false"></textarea>
+        </details>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num" aria-hidden="true">2</div>
+      <div>
+        <h2>키 파일 불러오기</h2>
+        <div class="file-row">
+          <label class="btn" for="keyFile">rx_secret.key 선택</label>
+          <input type="file" id="keyFile">
+          <span class="file-name" id="keyName">선택된 키 없음</span>
+        </div>
+        <label class="check"><input type="checkbox" id="rememberKey"> 이 기기에서 키 기억하기</label>
+        <p class="hint">QR코드를 만들 때 사용한 키와 같은 파일이어야 합니다. 키를 기억해 두면 다음부터는 QR코드를 찍기만 해도 처방전이 바로 열립니다. 여러 사람이 함께 쓰는 기기에서는 켜지 마세요.</p>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" id="decodeBtn" disabled>처방전 읽기</button>
+      <div class="status error" id="status" role="alert" hidden></div>
+    </div>
+  </section>
+
+  <section class="rx" id="rx" hidden aria-live="polite">
+    <div class="form" id="form"></div>
+    <div class="rx-actions">
+      <button class="btn" id="printBtn">인쇄</button>
+      <button class="btn" id="clearBtn">지우기</button>
+    </div>
+    <details class="raw">
+      <summary>원본 데이터(JSON) 보기</summary>
+      <pre id="raw"></pre>
+    </details>
+  </section>
+
+  <footer>QR 형식: 판독기 주소 + “#RX1.” + Base64URL(nonce 12바이트 + AES-256-GCM 암호문), 내용은 zlib 압축된 JSON입니다. 주소의 # 뒷부분은 서버로 전송되지 않습니다. 연습용 도구이므로 실제 진료 환경에서는 검증된 시스템을 사용하세요.</footer>
+</main>
+
+<script>
+(() => {
+  const PREFIX = "RX1:";
+  const AAD = new TextEncoder().encode("prescription-v1");
+  const $ = (id) => document.getElementById(id);
+
+  let qrPayload = null;   // QR에서 읽은 문자열
+  let keyBytes = null;    // 32바이트 키
+  let decoded = null;
+  let pendingFromLink = false; // QR 링크로 열린 뒤 키를 기다리는 중
+
+  // ---------- 입력 처리 ----------
+  function updateButton() {
+    const pasted = $("qrText").value.trim();
+    $("decodeBtn").disabled = !((qrPayload || pasted) && keyBytes);
+  }
+  function showStatus(msg, kind) { const s = $("status"); s.textContent = msg; s.className = "status " + kind; s.hidden = false; }
+  function showError(msg) { showStatus(msg, "error"); }
+  function showInfo(msg) { showStatus(msg, "info"); }
+  function clearError() { $("status").hidden = true; }
+
+  async function readQrFromFile(file) {
+    const bitmap = await createImageBitmap(file);
+    // 1) 브라우저 내장 BarcodeDetector가 있으면 우선 사용
+    if ("BarcodeDetector" in window) {
+      try {
+        const det = new BarcodeDetector({ formats: ["qr_code"] });
+        const found = await det.detect(bitmap);
+        if (found.length && found[0].rawValue) return found[0].rawValue;
+      } catch (_) { /* jsQR로 재시도 */ }
+    }
+    // 2) jsQR: 큰 사진은 줄여서 판독
+    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+    const w = Math.round(bitmap.width * scale), h = Math.round(bitmap.height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    const img = ctx.getImageData(0, 0, w, h);
+    const r = jsQR(img.data, w, h, { inversionAttempts: "attemptBoth" });
+    return r ? r.data : null;
+  }
+
+  async function onQrFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    clearError();
+    $("qrName").textContent = "읽는 중…";
+    $("qrName").classList.remove("ok");
+    try {
+      const text = await readQrFromFile(file);
+      if (!text) {
+        qrPayload = null;
+        $("qrName").textContent = file.name;
+        showError("이미지에서 QR코드를 찾지 못했습니다. QR코드가 화면에 크고 선명하게 나오도록 다시 찍거나, 원본 PNG 파일을 선택하세요.");
+      } else {
+        qrPayload = normalizePayload(text);
+        $("qrName").textContent = file.name + " · QR 인식됨";
+        $("qrName").classList.add("ok");
+      }
+    } catch (err) {
+      qrPayload = null;
+      $("qrName").textContent = file.name;
+      showError("이미지를 열 수 없습니다. PNG나 JPG 파일인지 확인하세요.");
+    }
+    e.target.value = "";
+    updateButton();
+  }
+  $("qrFile").addEventListener("change", onQrFile);
+  $("qrCam").addEventListener("change", onQrFile);
+  $("qrText").addEventListener("input", updateButton);
+
+  $("keyFile").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    clearError();
+    const buf = new Uint8Array(await file.arrayBuffer());
+    if (buf.length !== 32) {
+      keyBytes = null;
+      $("keyName").textContent = file.name;
+      $("keyName").classList.remove("ok");
+      showError(`키 파일 크기가 ${buf.length}바이트입니다. AES-256 키는 32바이트여야 하니 keygen으로 만든 rx_secret.key를 선택하세요.`);
+    } else {
+      keyBytes = buf;
+      $("keyName").textContent = file.name + " · 키 확인됨";
+      $("keyName").classList.add("ok");
+      if ($("rememberKey").checked) storeKey(buf);
+    }
+    e.target.value = "";
+    updateButton();
+    if (keyBytes && pendingFromLink) runDecode();
+  });
+
+  // ---------- 복호화 ----------
+  function b64urlToBytes(s) {
+    const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+  }
+
+  async function decrypt(text, key) {
+    if (!text.startsWith(PREFIX)) throw new Error("처방전 QR 형식이 아닙니다. 내용이 “RX1:”로 시작해야 합니다.");
+    let blob;
+    try { blob = b64urlToBytes(text.slice(PREFIX.length)); }
+    catch (_) { throw new Error("QR 내용이 손상되었습니다. 문자열이 잘리거나 바뀌지 않았는지 확인하세요."); }
+    if (blob.length < 29) throw new Error("QR 내용이 너무 짧습니다. 문자열 전체가 들어갔는지 확인하세요.");
+    const cryptoKey = await crypto.subtle.importKey("raw", key, "AES-GCM", false, ["decrypt"]);
+    let plain;
+    try {
+      plain = await crypto.subtle.decrypt(
+        { name: "AES-GCM", iv: blob.slice(0, 12), additionalData: AAD },
+        cryptoKey, blob.slice(12)
+      );
+    } catch (_) {
+      throw new Error("복호화에 실패했습니다. 키가 QR을 만들 때 쓴 것과 다르거나, QR 내용이 위·변조되었습니다.");
+    }
+    const stream = new Blob([plain]).stream().pipeThrough(new DecompressionStream("deflate"));
+    const json = await new Response(stream).text();
+    return JSON.parse(json);
+  }
+
+  // 주소(…#RX1.xxx), RX1.xxx, RX1:xxx 어느 형태든 RX1:xxx로 맞춤
+  function normalizePayload(s) {
+    s = (s || "").trim();
+    const i = s.indexOf("#");
+    if (i >= 0) s = s.slice(i + 1);
+    if (s.startsWith("RX1.")) s = "RX1:" + s.slice(4);
+    return s;
+  }
+
+  async function runDecode() {
+    clearError();
+    pendingFromLink = false;
+    const text = normalizePayload($("qrText").value || qrPayload || "");
+    try {
+      decoded = await decrypt(text, keyBytes);
+      render(decoded);
+    } catch (err) {
+      showError(err.message || "처방전을 읽지 못했습니다.");
+    }
+  }
+  $("decodeBtn").addEventListener("click", runDecode);
+
+  // ---------- 화면 표시 ----------
+  const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const val = (v, unit = "") =>
+    v === null || v === undefined || v === "" ? '<span class="missing">미기재</span>' : esc(v) + unit;
+  const field = (k, v) => `<div class="field"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  const maskRrn = (r) => (r && r.length >= 8 ? r.slice(0, 8) + "******" : r);
+
+  function render(d) {
+    const issue = d.issue || {};
+    const p = d.patient || {}, inst = d.institution || {}, doc = d.doctor || {};
+    const codes = d.disease_codes || (d.disease_code ? [d.disease_code] : []);
+    const drugs = Array.isArray(d.drugs) ? d.drugs : [];
+    const issued = issue.date || d.issued;
+
+    const issueLine = [
+      issue.number ? `교부번호 <b>${esc(issue.number)}</b>` : "",
+      issued ? `발급일 <b>${esc(issued)}</b>${issue.serial ? ` 제${esc(issue.serial)}호` : ""}` : "",
+    ].filter(Boolean).join("<br>");
+
+    const drugRows = drugs.length
+      ? drugs.map((g) => `<tr>
+          <td>${val(g.name)}</td>
+          <td class="num">${val(g.dose)}</td>
+          <td class="num">${val(g.times_per_day, g.times_per_day != null ? "회" : "")}</td>
+          <td class="num">${val(g.days, g.days != null ? "일" : "")}</td>
+        </tr>`).join("")
+      : '<tr><td colspan="4"><span class="missing">처방 의약품 없음</span></td></tr>';
+
+    const validity = d.valid_days != null
+      ? `교부일부터 ${esc(d.valid_days)}일 이내`
+      : '<span class="missing">미기재</span>';
+
+    // 양식에 없는 추가 필드는 따로 표시 (데이터 누락 방지)
+    const known = ["issue", "issued", "patient", "institution", "doctor", "disease_codes", "disease_code", "drugs", "valid_days"];
+    const extras = Object.keys(d).filter((k) => !known.includes(k));
+    const extraHtml = extras.length
+      ? `<div class="sec"><div class="sec-head">기타</div><dl class="extra">${
+          extras.map((k) => `<dt>${esc(k)}</dt><dd>${esc(typeof d[k] === "object" ? JSON.stringify(d[k]) : d[k])}</dd>`).join("")
+        }</dl></div>`
+      : "";
+
+    $("form").innerHTML = `
+      <div class="form-title">
+        <h2>처방전</h2>
+        <div class="issue">${issueLine || '<span class="missing">발급 정보 미기재</span>'}</div>
+      </div>
+      <div class="sec">
+        <div class="sec-head">환자</div>
+        <div class="fields">
+          ${field("성명", val(p.name))}
+          ${field("주민등록번호", p.rrn
+            ? `<span class="rrn"><span id="rrnText">${esc(maskRrn(p.rrn))}</span><button class="linkish" id="rrnToggle" aria-pressed="false">전체 보기</button></span>`
+            : val(null))}
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-head">의료기관</div>
+        <div class="fields">
+          ${field("명칭", val(inst.name))}
+          ${field("요양기관기호", val(inst.code))}
+          ${field("전화번호", val(inst.tel))}
+          ${inst.fax ? field("팩스번호", val(inst.fax)) : ""}
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-head">처방 의료인</div>
+        <div class="fields">
+          ${field("성명", val(doc.name))}
+          ${field("면허종류", val(doc.license_type))}
+          ${field("면허번호", val(doc.license_no))}
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-head">질병분류기호</div>
+        <div class="codes">${codes.length ? codes.map((c) => `<span class="code">${esc(c)}</span>`).join("") : val(null)}</div>
+      </div>
+      <div class="sec">
+        <div class="sec-head">처방 의약품</div>
+        <div class="drugs-wrap">
+          <table class="drugs">
+            <thead><tr><th>명칭</th><th class="num">1회 투약량</th><th class="num">1일 투여횟수</th><th class="num">총 투약일수</th></tr></thead>
+            <tbody>${drugRows}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-head">사용기간</div>
+        <div class="fields">${field("유효기간", validity)}</div>
+      </div>
+      ${extraHtml}
+    `;
+
+    const toggle = $("rrnToggle");
+    if (toggle) {
+      toggle.addEventListener("click", () => {
+        const shown = toggle.getAttribute("aria-pressed") === "true";
+        $("rrnText").textContent = shown ? maskRrn(p.rrn) : p.rrn;
+        toggle.textContent = shown ? "전체 보기" : "가리기";
+        toggle.setAttribute("aria-pressed", String(!shown));
+      });
+    }
+
+    $("raw").textContent = JSON.stringify(d, null, 2);
+    const rx = $("rx");
+    rx.hidden = false;
+    rx.classList.remove("reveal"); void rx.offsetWidth; rx.classList.add("reveal");
+    rx.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  }
+
+  $("printBtn").addEventListener("click", () => window.print());
+  $("clearBtn").addEventListener("click", () => {
+    decoded = null; qrPayload = null; keyBytes = null; pendingFromLink = false;
+    $("form").innerHTML = ""; $("raw").textContent = ""; $("rx").hidden = true;
+    $("qrText").value = "";
+    $("qrName").textContent = "선택된 이미지 없음"; $("qrName").classList.remove("ok");
+    $("keyName").textContent = "선택된 키 없음"; $("keyName").classList.remove("ok");
+    restoreKey();
+    clearError(); updateButton();
+    window.scrollTo({ top: 0 });
+  });
+
+  if (!window.crypto || !crypto.subtle || !("DecompressionStream" in window)) {
+    showError("이 브라우저는 복호화 기능을 지원하지 않습니다. 최신 Chrome, Edge, Safari, Firefox에서 열어주세요.");
+  }
+
+  // ---------- 키 기억하기 (이 기기의 이 브라우저에만 저장) ----------
+  const KEY_STORE = "rx-key-v1";
+  function storeKey(bytes) { try { localStorage.setItem(KEY_STORE, btoa(String.fromCharCode(...bytes))); } catch (_) {} }
+  function forgetKey() { try { localStorage.removeItem(KEY_STORE); } catch (_) {} }
+  function restoreKey() {
+    try {
+      const s = localStorage.getItem(KEY_STORE);
+      if (!s) return false;
+      const b = Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+      if (b.length !== 32) { forgetKey(); return false; }
+      keyBytes = b;
+      $("keyName").textContent = "이 기기에 저장된 키 사용 중";
+      $("keyName").classList.add("ok");
+      $("rememberKey").checked = true;
+      return true;
+    } catch (_) { return false; }
+  }
+  $("rememberKey").addEventListener("change", (e) => {
+    if (e.target.checked) { if (keyBytes) storeKey(keyBytes); }
+    else forgetKey();
+  });
+
+  // ---------- QR 링크로 열렸을 때 자동으로 불러오기 ----------
+  function loadFromLink() {
+    const h = location.hash.slice(1);
+    if (!h.startsWith("RX1.")) return;
+    qrPayload = normalizePayload(h);
+    pendingFromLink = true;
+    $("qrName").textContent = "QR코드에서 불러옴";
+    $("qrName").classList.add("ok");
+    updateButton();
+    if (keyBytes) runDecode();
+    else showInfo("QR코드 내용을 불러왔습니다. 2번에서 키 파일을 선택하면 처방전이 바로 열립니다.");
+  }
+
+  restoreKey();
+  updateButton();
+  loadFromLink();
+  window.addEventListener("hashchange", loadFromLink);
+})();
+</script>
+</body>
+</html>
